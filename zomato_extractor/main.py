@@ -1,12 +1,20 @@
 # Description: This file contains the code for concurrency
 import json
-import helpers.helper as helper
+import logging
 import threading
 import multiprocessing
-import helpers.zomatoDataExtractor as zomatoDataExtractor
+import helpers.helper as helper
 from helpers.scheduler import Scheduler
+import helpers.zomatoDataExtractor as zomatoDataExtractor
 
 
+logging.basicConfig(
+    level=logging.NOTSET,
+    format="{asctime} {levelname} {message}",
+    style="{",
+    filename="%slog" % __file__[:-2],
+    filemode="w",
+)
 lock = multiprocessing.Lock()
 
 
@@ -19,27 +27,56 @@ class DownloadProcess(multiprocessing.Process):
 
     def run(self):
         while True:
-
             try:
                 print(f"Extracting Data...")
+                logging.info("Extracting Data...")
                 delivery_city = self.queue.get()
-                with open("zomatodata.json", "r") as f:
+
+                with open("app_state.json", "r") as f:
                     data = json.load(f)
-                if delivery_city["city_id"] not in [i["id"] for i in data["data"]]:
+
+                if len(data["GLOBAL_STATE_QUEUE"]) != 0:
+                    if delivery_city["city_id"] not in [
+                        id for id in data["GLOBAL_STATE_QUEUE"]
+                    ]:
+
+                        info = (
+                            zomatoDataExtractor.get_locality_and_restaurant_basic_info(
+                                delivery_city
+                            )
+                        )
+                        print(f"Extracted Data...")
+                        logging.info("Extracted Data...")
+                        logging.info("Processing Data...")
+                        self.process_data(info)
+                        logging.info("Processed Data...")
+                        logging.info("Updating Global State...")
+                        self.update_global_state(delivery_city)
+                        logging.info("Updated Global State...")
+                    else:
+                        print(f"Data already exists for {delivery_city['city_id']}")
+                        logging.info(
+                            f"Data already exists for {delivery_city['city_id']}"
+                        )
+                        with open(self.global_state, "r") as f:
+                            app_state = json.load(f)
+                        app_state["LENGTH_OF_DELIVERY_CITIES"] -= 1
+                        logging.info("Updating Global State...")
+                        self.update_global_state(delivery_city)
+                        logging.info("Updated Global State...")
+                        continue
+                else:
                     info = zomatoDataExtractor.get_locality_and_restaurant_basic_info(
                         delivery_city
                     )
                     print(f"Extracted Data...")
+                    logging.info("Extracted Data...")
+                    logging.info("Processing Data...")
                     self.process_data(info)
+                    logging.info("Processed Data...")
+                    logging.info("Updating Global State...")
                     self.update_global_state(delivery_city)
-                else:
-                    print(f"Data already exists for {delivery_city['city_id']}")
-                    with open(self.global_state, "r") as f:
-                        app_state = json.load(f)
-                    app_state["LENGTH_OF_DELIVERY_CITIES"] -= 1
-                    self.update_global_state(delivery_city)
-                    continue
-
+                    logging.info("Updated Global State...")
             finally:
                 self.queue.task_done()
 
@@ -75,13 +112,9 @@ class DownloadProcess(multiprocessing.Process):
 
 def main(data):
     delivery_cities_and_urls = data
-    try:
-        with open("zomatodata.json", "r") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        with open("zomatodata.json", "w") as f:
-            json.dump({"data": []}, f)
+    logging.info("Loading the data if exist else building new json file")
 
+    logging.info("Starting the download process...")
     queue = multiprocessing.JoinableQueue()
     for _ in range(3):
         process = DownloadProcess(queue, "app_state.json")
@@ -95,7 +128,21 @@ def main(data):
 
 
 if __name__ == "__main__":
+    logging.info("Starting the program...")
+    logging.info(
+        "Visisting 'https://www.zomato.com/delivery-cities' and extracticting basic location details"
+    )
     data = helper.get_data_of_delivery_cities()
+    logging.info("Extracted basic location details")
+    logging.info("Starting the concurrent download process...")
+    logging.info("Starting the state manager...")
+
+    try:
+        with open("zomatodata.json", "r") as f:
+            json.load(f)
+    except FileNotFoundError:
+        with open("zomatodata.json", "w") as f:
+            json.dump({"data": []}, f)
 
     p1 = threading.Thread(
         target=Scheduler().schedule,
@@ -106,6 +153,7 @@ if __name__ == "__main__":
         daemon=True,
     )
     p1.start()
+    logging.info("Starting the main function...")
     p2 = threading.Thread(target=main, args=(data,), daemon=True)
     p2.start()
     p1.join()
