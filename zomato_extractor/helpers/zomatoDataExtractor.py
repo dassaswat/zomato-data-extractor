@@ -1,4 +1,5 @@
 import time
+import json
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
@@ -31,10 +32,11 @@ def get_delivery_locations_and_its_urls() -> list[dict]:
             data: dict = {
                 "city_id": index,
                 "city_name": element.text,
+                "city_url": element.get_attribute("href"),
                 "restaurants": [],
                 "total_restaurant_in_locality": 0,
             }
-
+            
             delivery_locations_and_urls_data.append(data)
 
         print(f"------ Time taken: {time.time() - start} seconds ------")
@@ -42,6 +44,8 @@ def get_delivery_locations_and_its_urls() -> list[dict]:
         print("\n")
 
         driver.quit()
+        with open("delivery_cities.json", "w") as f:
+            json.dump(delivery_locations_and_urls_data, f)
         return delivery_locations_and_urls_data
 
     except:  # If any error occurs
@@ -51,8 +55,9 @@ def get_delivery_locations_and_its_urls() -> list[dict]:
 def get_locality_and_restaurant_basic_info(location: dict):
     service = ChromeService(executable_path="chromedriver")
     driver = webdriver.Chrome(service=service)
+    
     driver.get(
-        f"https://www.zomato.com/{location['city_name'].lower()}/restaurants"
+        f"https://www.zomato.com/{location['city_url'][23:].lower()}/restaurants"
     )  # Get the city restaurants url
 
     try:
